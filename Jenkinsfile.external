@@ -27,7 +27,7 @@ node {
    stage ('Archive') {
 
        // Archive the artifacts in jenkins
-       step([$class: 'ArtifactArchiver', artifacts: '**/deploy/deployments/*.war', fingerprint: true])
+       step([$class: 'ArtifactArchiver', artifacts: '**/deployments/*.war', fingerprint: true])
 
        // Archive the test results.
        step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
@@ -39,20 +39,19 @@ node {
 
 
    stage ('Create Image') {
-       sh "echo 'Downloading WAR file from http://nexus-pqc-support.apps.192.168.124.215.nip.io/nexus/repositroy/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war'"
+       echo 'Downloading WAR file from http://nexus-pqc-support.apps.192.168.124.215.nip.io/nexus/repositroy/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war'
        sh "curl -O http://nexus-pqc-support.apps.192.168.124.215.nip.io/repository/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war"
-       sh "mkdir -p deploy/deployments && mv person-qualification-calculator-${env.BUILD_NUMBER}.war deploy/deployments/ROOT.war"
 
        withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-		 sh "oc delete bc/pqc-dev is/pqc-dev --token=$TOKEN --namespace pqc-dev || true"
-		 sh "oc set triggers dc/pqc-dev --from-image=pqc-dev:latest --remove --token=$TOKEN --namespace=pqc-dev || true"
+	 sh "oc delete bc/pqc-dev is/pqc-dev --token=$TOKEN --namespace pqc-dev || true"
+         sh "oc rollout pause dc/pqc-dev --token=$TOKEN --namespace=pqc-dev || true"
          sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:latest --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-         //sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:1.5 --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-         sh "oc start-build --from-dir=deploy bc/pqc-dev --follow --wait --namespace=pqc-dev --token=$TOKEN"
+         //sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:1.3 --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
+         sh "oc start-build --from-dir=deployments bc/pqc-dev --follow --wait --namespace=pqc-dev --token=$TOKEN"
       }
    }
 
-   stage ('Scan Image') {
+   stage ('Image CVE Scan') {
      withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
        echo 'Pulling the docker image locally'
        sh "sudo docker login -u ${USER} -p ${TOKEN} docker-registry.apps.192.168.124.215.nip.io"
@@ -60,7 +59,7 @@ node {
        SCAN_RESULT = sh([returnStatus: true, script: 'sudo oscap-docker image-cve docker-registry.apps.192.168.124.215.nip.io/pqc-dev/pqc-dev:latest --report report.html | grep true'])
        publishHTML( target: [allowMissing: false, alwaysLinkToLastBuild: false, keepAll: true, reportDir: '.', reportFiles: 'report.html', reportName: 'OpenSCAP CVE Scan Report'])
        // In order to enable the CSS in the archived report, start Jenkins with: java -jar -Dhudson.model.DirectoryBrowserSupport.CSP="" jenkins.war
-       if (SCAN_RESULT==0) {
+       if (SCAN_RESULT == 0) {
           timeout(time: 7, unit: 'DAYS') {
           echo "CVE(s) Detected!"
           input message: 'One or more CVEs were detected. Please review the OpenSCAP Report before proceeding.', submitter: 'admin'
@@ -70,15 +69,25 @@ node {
      }
    }
 
+/*
+   stage ('Image SSG Scan') {
+     withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
+       SCAN_RESULT = sh([returnStatus: true, script: 'sudo oscap-docker image docker-registry.apps.192.168.124.215.nip.io/pqc-dev/pqc-dev:latest xccdf eval --report ssg-report.html /home/openshift/ssg-eap6-ds.xml| grep true'])
+       publishHTML( target: [allowMissing: false, alwaysLinkToLastBuild: false, keepAll: true, reportDir: '.', reportFiles: 'ssg-report.html', reportName: 'OpenSCAP EAP SSG Scan Report'])
+       if (SCAN_RESULT == 0) {
+          timeout(time: 7, unit: 'DAYS') {
+          echo "SSG Failures Detected!"
+          input message: 'One or more SSG failures were detected. Please review the OpenSCAP Report before proceeding.', submitter: 'admin'
+        }
+         }
+          else echo "Passed Scan"
+     }
+   }
+*/
+
    stage ('Deploy to Dev') {
      withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-        sh "oc new-app pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-        sh "oc set resources dc/pqc-dev --requests=cpu=500m,memory=256Mi --limits=cpu=2000m,memory=1Gi -n pqc-dev --token=$TOKEN || true"
-        sh "oc set probe dc/pqc-dev --readiness --failure-threshold=3 --initial-delay-seconds=3 --period-seconds=5 --timeout-seconds=3 --get-url=http://:8080/rest/healthz -n pqc-dev --token=$TOKEN"
-        sh "oc set probe dc/pqc-dev --liveness --failure-threshold=30 --period-seconds=10 --timeout-seconds=3 --initial-delay-seconds=300 --get-url=http://:8080/rest/healthz -n pqc-dev --token=$TOKEN"
-        sh "oc expose svc/pqc-dev --namespace=pqc-dev --token=$TOKEN || true"
-        sh "oc set triggers dc/pqc-dev --from-image=pqc-dev:latest --containers=pqc-dev --namespace=pqc-dev --token=$TOKEN"
-        sh "oc rollout latest dc/pqc-dev --namespace=pqc-dev --token=$TOKEN || true"
+        sh "oc rollout resume dc/pqc-dev --token=$TOKEN --namespace=pqc-dev || true"
         sh "oc tag pqc-dev/pqc-dev:latest pqc-dev/pqc-dev:${env.BUILD_NUMBER} --namespace=pqc-dev --token=$TOKEN"
         openshiftVerifyDeployment apiURL: 'https://ocp:8443', authToken: '$TOKEN', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
       }

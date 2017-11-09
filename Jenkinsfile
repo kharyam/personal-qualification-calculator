@@ -21,39 +21,55 @@ node('maven') {
    stage ('Archive') {
 
        // Archive the artifacts in jenkins
-       step([$class: 'ArtifactArchiver', artifacts: '**/deploy/deployments/*.war', fingerprint: true])
+       step([$class: 'ArtifactArchiver', artifacts: '**/deployments/*.war', fingerprint: true])
 
        // Archive the test results.
        step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
 
        // Deploy the artifacts to Nexus
        echo 'Sending artifacts to Nexus'
-       sh "mvn deploy -Dmaven.test.skip=true -Popenshift -DaltDeploymentRepository=nexus::default::http://nexus.pqc-support:8081/repository/maven-releases/"
+       //sh "mvn deploy -Dmaven.test.skip=true -Popenshift -DaltDeploymentRepository=nexus::default::http://nexus.pqc-support:8081/repository/maven-releases/"
    }
 
-
-   stage ('Create Image') {
-       sh "echo 'Downloading WAR file from http://nexus:8081/nexus/repositroy/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war'"
+     stage ('Create Image') {
+       echo 'Downloading WAR file from http://nexus.pqc-support:8081/repositroy/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war'
        sh "curl -O http://nexus.pqc-support:8081/repository/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war"
-       sh "mkdir -p deploy/deployments && mv person-qualification-calculator-${env.BUILD_NUMBER}.war deploy/deployments/ROOT.war"
 
        withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-       sh "oc delete bc/pqc-dev is/pqc-dev --token=$TOKEN --namespace pqc-dev || true"
-       sh "oc set triggers dc/pqc-dev --from-image=pqc-dev:latest --remove --token=$TOKEN --namespace=pqc-dev || true"
-       sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:latest --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-       //sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:1.5 --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-       sh "oc start-build --from-dir=deploy bc/pqc-dev --follow --wait --namespace=pqc-dev --token=$TOKEN"
+         sh "oc delete bc/pqc-dev is/pqc-dev --token=$TOKEN --namespace pqc-dev || true"
+         sh "oc rollout pause dc/pqc-dev --token=$TOKEN --namespace=pqc-dev || true"
+         sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:latest --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
+         //sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:1.3 --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
+         sh "oc start-build --from-dir=deployments bc/pqc-dev --follow --wait --namespace=pqc-dev --token=$TOKEN"
       }
    }
 
-   stage ('Scan Image') {
-     withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-       echo 'Pulling the docker image locally'
-       sh "sudo docker login -u ${USER} -p ${TOKEN} docker-registry.default:5000"
-       sh "sudo docker pull docker-registry.default:5000/pqc-dev/pqc-dev:latest"
-       SCAN_RESULT = sh([returnStatus: true, script: 'sudo oscap-docker image-cve docker-registry:5000/pqc-dev/pqc-dev:latest --report report.html | grep true'])
-       publishHTML( target: [allowMissing: false, alwaysLinkToLastBuild: false, keepAll: true, reportDir: '.', reportFiles: 'report.html', reportName: 'OpenSCAP CVE Scan Report'])
+}
 
+
+podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', containers: [
+  containerTemplate(
+    name: 'jnlp',
+    image: 'docker-registry.default.svc:5000/openshift/scap-slave',
+    alwaysPullImage: true,
+    args: '${computer.jnlpmac} ${computer.name}',
+    ttyEnabled: false,
+    privileged: true, 
+    workingDir: '/tmp/jenkins')],
+      volumes: [
+        hostPathVolume( hostPath: '/var/run/docker.sock', mountPath: '/var/run/docker.sock')
+      ]
+    )
+{
+
+
+node('scap'){
+  stage('OpenSCAP Scan') {
+       SCAN_RESULT = sh([returnStatus: true, script: 'image-inspector --image=docker-registry.default.svc:5000/pqc-dev/pqc-dev:latest --path=/tmp/image-content --scan-type=openscap --openscap-html-report | grep "0 failed" $(find /var/tmp -name results.html)'])
+       sh 'mv $(find /var/tmp -name results.html) .'
+       publishHTML( target: [allowMissing: false, alwaysLinkToLastBuild: false, keepAll: true,  reportDir: '.', reportFiles: 'results.html', reportName: 'OpenSCAP CVE Scan Results'])
+       archiveArtifacts 'results.html'
+       // In order to enable the CSS in the archived report, start Jenkins with: java -jar -Dhudson.model.DirectoryBrowserSupport.CSP="" jenkins.war
        if (SCAN_RESULT == 0) {
           timeout(time: 7, unit: 'DAYS') {
           echo "CVE(s) Detected!"
@@ -61,9 +77,11 @@ node('maven') {
         }
          }
           else echo "Passed Scan"
-     }
-   }
+     } 
+  }
+}
 
+node('maven') {
    stage ('Deploy to Dev') {
      withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
         sh "oc new-app pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
@@ -74,7 +92,7 @@ node('maven') {
         sh "oc set triggers dc/pqc-dev --from-image=pqc-dev:latest --containers=pqc-dev --namespace=pqc-dev --token=$TOKEN"
         sh "oc rollout latest dc/pqc-dev --namespace=pqc-dev --token=$TOKEN || true"
         sh "oc tag pqc-dev/pqc-dev:latest pqc-dev/pqc-dev:${env.BUILD_NUMBER} --namespace=pqc-dev --token=$TOKEN"
-        openshiftVerifyDeployment apiURL: 'https://kubernetes:443', authToken: '$TOKEN', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+        openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', authToken: '$TOKEN', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
       }
    }
 
@@ -86,7 +104,7 @@ node('maven') {
        withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
          sh "oc tag pqc-dev/pqc-dev:${env.BUILD_NUMBER} pqc-test/pqc-test:${env.BUILD_NUMBER} --token=$TOKEN"
          sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-test/pqc-test:latest --token=$TOKEN"
-         openshiftVerifyDeployment apiURL: 'https://kubernetes:443',authToken: '$TOKEN', depCfg: 'pqc-test', namespace: 'pqc-test', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+         openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443',authToken: '$TOKEN', depCfg: 'pqc-test', namespace: 'pqc-test', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
        }
    }
 
@@ -98,7 +116,7 @@ node('maven') {
        withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
          sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-prod/pqc-prod:${env.BUILD_NUMBER} --token=$TOKEN"
          sh "oc tag pqc-prod/pqc-prod:${env.BUILD_NUMBER} pqc-prod/pqc-prod:latest --token=$TOKEN"
-         openshiftVerifyDeployment apiURL:  'https://kubernetes:443',authToken: '$TOKEN', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+         openshiftVerifyDeployment apiURL:  'https://kubernetes.default:443',authToken: '$TOKEN', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
        }
    }
 }
