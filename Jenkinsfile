@@ -64,12 +64,11 @@ podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', containers: [
 ) {
   node('scap') {
     stage('OpenSCAP Scan') {
-      SCAN_RESULT = sh([returnStatus: true, script: 'image-inspector --image=docker-registry.default.svc:5000/pqc-dev/pqc-dev:latest --path=/tmp/image-content --scan-type=openscap --openscap-html-report | grep "0 failed" $(find /var/tmp -name results.html)'])
-      sh 'mv $(find /var/tmp -name results.html) .'
+      SCAN_RESULT = sh([returnStatus: true, script: 'cve-scan docker-registry.default.svc:5000/pqc-dev/pqc-dev:latest'])
       publishHTML(target: [allowMissing: false, alwaysLinkToLastBuild: false, keepAll: true, reportDir: '.', reportFiles: 'results.html', reportName: 'OpenSCAP CVE Scan Results'])
       archiveArtifacts 'results.html'
       // In order to enable the CSS in the archived report, start Jenkins with: java -jar -Dhudson.model.DirectoryBrowserSupport.CSP="" jenkins.war
-      if (SCAN_RESULT == 0) {
+      if (SCAN_RESULT != 0) {
         timeout(time: 7, unit: 'DAYS') {
           echo "CVE(s) Detected!"
           input message: 'One or more CVEs were detected. Please review the OpenSCAP Report before proceeding.', submitter: 'admin,admin-admin'
