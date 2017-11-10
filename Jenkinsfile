@@ -28,6 +28,9 @@ node('maven') {
 
     // Deploy the artifacts to Nexus
     echo 'Sending artifacts to Nexus'
+
+    // Update settings.xml with nexus credentials.  Note - Do not store hardcoded passwords in this file!
+    sh "sed -i 's|</settings>|  <servers>\\n    <server>\\n      <id>nexus</id>\\n      <username>admin</username>\\n      <password>admin123</password>\\n    </server>\\n  </servers>\\n</settings>|' ${HOME}/.m2/settings.xml"
     sh "mvn deploy -Dmaven.test.skip=true -Popenshift -DaltDeploymentRepository=nexus::default::http://nexus.pqc-support:8081/repository/maven-releases/"
   }
 
@@ -69,7 +72,7 @@ podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', containers: [
       if (SCAN_RESULT == 0) {
         timeout(time: 7, unit: 'DAYS') {
           echo "CVE(s) Detected!"
-          input message: 'One or more CVEs were detected. Please review the OpenSCAP Report before proceeding.', submitter: 'admin'
+          input message: 'One or more CVEs were detected. Please review the OpenSCAP Report before proceeding.', submitter: 'admin,admin-admin'
         }
       } else echo "Passed Scan"
     }
@@ -88,7 +91,7 @@ node('maven') {
 
   stage('Deploy to Test') {
     timeout(time: 7, unit: 'DAYS') {
-      input message: 'Do you want to deploy PQC to Test?', submitter: 'admin'
+      input message: 'Do you want to deploy PQC to Test?', submitter: 'admin,admin-admin'
     }
     echo 'Promoting container to Test Environment'
     withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
@@ -100,7 +103,7 @@ node('maven') {
 
   stage('Deploy to Prod') {
     timeout(time: 7, unit: 'DAYS') {
-      input message: 'Do you want to deploy PQC to Production?', submitter: 'admin'
+      input message: 'Do you want to deploy PQC to Production?', submitter: 'admin,admin-admin'
     }
     echo 'Promoting container to Production Environment'
     withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
