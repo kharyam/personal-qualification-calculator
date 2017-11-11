@@ -46,7 +46,7 @@ node('maven') {
 
 }
 
-podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 1200, containers: [
+podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 240, containers: [
     containerTemplate(
         name: 'jnlp',
         image: 'docker-registry.default.svc:5000/openshift/scap-slave',
@@ -76,7 +76,6 @@ podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 1200, 
 }
 
 node('maven') {
-
   stage('Deploy to Dev') {
     sh "oc rollout resume dc/pqc-dev --namespace=pqc-dev || true"
     sh "oc tag pqc-dev/pqc-dev:latest pqc-dev/pqc-dev:${env.BUILD_NUMBER} --namespace=pqc-dev"
@@ -100,6 +99,6 @@ node('maven') {
     echo 'Promoting container to Production Environment'
     sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-prod/pqc-prod:${env.BUILD_NUMBER}"
     sh "oc tag pqc-prod/pqc-prod:${env.BUILD_NUMBER} pqc-prod/pqc-prod:latest"
-      openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+    openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 }
