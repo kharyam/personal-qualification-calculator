@@ -30,26 +30,23 @@ node('maven') {
     echo 'Sending artifacts to Nexus'
 
     // Update settings.xml with nexus credentials.  Note - Do not store hardcoded passwords in this file!
-    sh "sed -i 's|</settings>|  <servers>\\n    <server>\\n      <id>nexus</id>\\n      <username>admin</username>\\n      <password>admin123</password>\\n    </server>\\n  </servers>\\n</settings>|' ${HOME}/.m2/settings.xml"
+    sh "grep server ${HOME}/.m2/settings.xml || sed -i 's|</settings>|  <servers>\\n    <server>\\n      <id>nexus</id>\\n      <username>admin</username>\\n      <password>admin123</password>\\n    </server>\\n  </servers>\\n</settings>|' ${HOME}/.m2/settings.xml"
     sh "mvn deploy -Dmaven.test.skip=true -Popenshift -DaltDeploymentRepository=nexus::default::http://nexus.pqc-support:8081/repository/maven-releases/"
   }
 
   stage('Create Image') {
     echo 'Downloading WAR file from http://nexus.pqc-support:8081/repositroy/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war'
     sh "curl -O http://nexus.pqc-support:8081/repository/maven-releases/gov/irs/pqc/person-qualification-calculator/${env.BUILD_NUMBER}/person-qualification-calculator-${env.BUILD_NUMBER}.war"
-
-    withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-      sh "oc delete bc/pqc-dev is/pqc-dev --token=$TOKEN --namespace pqc-dev || true"
-      sh "oc rollout pause dc/pqc-dev --token=$TOKEN --namespace=pqc-dev || true"
-      sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:latest --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-      //sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:1.3 --to=pqc-dev:latest --namespace=pqc-dev --token=$TOKEN || true"
-      sh "oc start-build --from-dir=deployments bc/pqc-dev --follow --wait --namespace=pqc-dev --token=$TOKEN"
-    }
+    sh "oc delete bc/pqc-dev is/pqc-dev --namespace pqc-dev || true"
+    sh "oc rollout pause dc/pqc-dev --namespace=pqc-dev || true"
+    sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:latest --to=pqc-dev:latest --namespace=pqc-dev || true"
+    //sh "oc new-build --binary --image-stream=openshift/jboss-eap70-openshift:1.3 --to=pqc-dev:latest --namespace=pqc-dev || true"
+    sh "oc start-build --from-dir=deployments bc/pqc-dev --follow --wait --namespace=pqc-dev" 
   }
 
 }
 
-podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', containers: [
+podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 1200, containers: [
     containerTemplate(
         name: 'jnlp',
         image: 'docker-registry.default.svc:5000/openshift/scap-slave',
@@ -81,11 +78,9 @@ podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', containers: [
 node('maven') {
 
   stage('Deploy to Dev') {
-    withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-      sh "oc rollout resume dc/pqc-dev --token=$TOKEN --namespace=pqc-dev || true"
-      sh "oc tag pqc-dev/pqc-dev:latest pqc-dev/pqc-dev:${env.BUILD_NUMBER} --namespace=pqc-dev --token=$TOKEN"
-      openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', authToken: '$TOKEN', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
-    }
+    sh "oc rollout resume dc/pqc-dev --namespace=pqc-dev || true"
+    sh "oc tag pqc-dev/pqc-dev:latest pqc-dev/pqc-dev:${env.BUILD_NUMBER} --namespace=pqc-dev"
+    openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 
   stage('Deploy to Test') {
@@ -93,11 +88,9 @@ node('maven') {
       input message: 'Do you want to deploy PQC to Test?', submitter: 'admin,admin-admin'
     }
     echo 'Promoting container to Test Environment'
-    withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-      sh "oc tag pqc-dev/pqc-dev:${env.BUILD_NUMBER} pqc-test/pqc-test:${env.BUILD_NUMBER} --token=$TOKEN"
-      sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-test/pqc-test:latest --token=$TOKEN"
-      openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', authToken: '$TOKEN', depCfg: 'pqc-test', namespace: 'pqc-test', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
-    }
+    sh "oc tag pqc-dev/pqc-dev:${env.BUILD_NUMBER} pqc-test/pqc-test:${env.BUILD_NUMBER}"
+    sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-test/pqc-test:latest"
+    openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-test', namespace: 'pqc-test', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 
   stage('Deploy to Prod') {
@@ -105,10 +98,8 @@ node('maven') {
       input message: 'Do you want to deploy PQC to Production?', submitter: 'admin,admin-admin'
     }
     echo 'Promoting container to Production Environment'
-    withCredentials([usernamePassword(credentialsId: 'jenkins-sa', passwordVariable: 'TOKEN', usernameVariable: 'USER')]) {
-      sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-prod/pqc-prod:${env.BUILD_NUMBER} --token=$TOKEN"
-      sh "oc tag pqc-prod/pqc-prod:${env.BUILD_NUMBER} pqc-prod/pqc-prod:latest --token=$TOKEN"
-      openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', authToken: '$TOKEN', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
-    }
+    sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-prod/pqc-prod:${env.BUILD_NUMBER}"
+    sh "oc tag pqc-prod/pqc-prod:${env.BUILD_NUMBER} pqc-prod/pqc-prod:latest"
+      openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 }
