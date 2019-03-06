@@ -46,10 +46,10 @@ node('maven') {
 
 }
 
-podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 240, containers: [
+/*podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 240, containers: [
     containerTemplate(
         name: 'jnlp',
-        image: 'docker-registry.default.svc:5000/openshift/scap-slave',
+        image: 'image-registry.openshift-image-registry.svc:5000/openshift/scap-slave',
         alwaysPullImage: true,
         args: '${computer.jnlpmac} ${computer.name}',
         ttyEnabled: false,
@@ -73,7 +73,7 @@ podTemplate(name: 'scap', label: 'scap', cloud: 'openshift', idleMinutes: 240, c
       } else echo "Passed Scan"
     }
   }
-}
+}*/
 
 node('maven') {
   stage('Deploy to Dev') {
