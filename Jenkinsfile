@@ -68,7 +68,7 @@ node('maven') {
       if (SCAN_RESULT != 0) {
         timeout(time: 7, unit: 'DAYS') {
           echo "CVE(s) Detected!"
-          input message: 'One or more CVEs were detected. Please review the OpenSCAP Report before proceeding.', submitter: 'admin,admin-admin'
+          input message: 'One or more CVEs were detected. Please review the OpenSCAP Report before proceeding.'//, submitter: 'admin,admin-admin'
         }
       } else echo "Passed Scan"
     }
@@ -85,7 +85,7 @@ node('maven') {
 
   stage('Deploy to Test') {
     timeout(time: 7, unit: 'DAYS') {
-      input message: 'Do you want to deploy PQC to Test?', submitter: 'admin,admin-admin'
+      input message: 'Do you want to deploy PQC to Test?' //, submitter: 'admin,admin-admin'
     }
     echo 'Promoting container to Test Environment'
     sh "oc tag pqc-dev/pqc-dev:${env.BUILD_NUMBER} pqc-test/pqc-test:${env.BUILD_NUMBER}"
@@ -96,7 +96,7 @@ node('maven') {
 
   stage('Deploy to Prod') {
     timeout(time: 7, unit: 'DAYS') {
-      input message: 'Do you want to deploy PQC to Production?', submitter: 'admin,admin-admin'
+      input message: 'Do you want to deploy PQC to Production?' //, submitter: 'admin,admin-admin'
     }
     echo 'Promoting container to Production Environment'
     sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-prod/pqc-prod:${env.BUILD_NUMBER}"
