@@ -1,7 +1,7 @@
 node('maven') {
   stage('Checkout') {
     // Get the latest code from Gogs
-    git url: 'http://gogs.pqc-support:3000/developer/person-qualification-calculator.git'
+    git url: 'https://github.com/kharyam/personal-qualification-calculator.git'
   }
 
   stage('Build') {
