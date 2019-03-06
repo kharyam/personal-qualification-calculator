@@ -79,7 +79,8 @@ node('maven') {
   stage('Deploy to Dev') {
     sh "oc rollout resume dc/pqc-dev --namespace=pqc-dev || true"
     sh "oc tag pqc-dev/pqc-dev:latest pqc-dev/pqc-dev:${env.BUILD_NUMBER} --namespace=pqc-dev"
-    openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+    sh "oc rollout status dc/pqc-dev -w -n pqc-dev"
+    //openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-dev', namespace: 'pqc-dev', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 
   stage('Deploy to Test') {
@@ -89,7 +90,8 @@ node('maven') {
     echo 'Promoting container to Test Environment'
     sh "oc tag pqc-dev/pqc-dev:${env.BUILD_NUMBER} pqc-test/pqc-test:${env.BUILD_NUMBER}"
     sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-test/pqc-test:latest"
-    openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-test', namespace: 'pqc-test', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+    sh "oc rollout status dc/pqc-test -w -n pqc-test"
+    //openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-test', namespace: 'pqc-test', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 
   stage('Deploy to Prod') {
@@ -99,6 +101,7 @@ node('maven') {
     echo 'Promoting container to Production Environment'
     sh "oc tag pqc-test/pqc-test:${env.BUILD_NUMBER} pqc-prod/pqc-prod:${env.BUILD_NUMBER}"
     sh "oc tag pqc-prod/pqc-prod:${env.BUILD_NUMBER} pqc-prod/pqc-prod:latest"
-    openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
+    sh "oc rollout status dc/pqc-prod -w -n pqc-prod"
+    //openshiftVerifyDeployment apiURL: 'https://kubernetes.default:443', depCfg: 'pqc-prod', namespace: 'pqc-prod', replicaCount: '1', verbose: 'false', verifyReplicaCount: 'true', waitTime: '120', waitUnit: 'sec'
   }
 }
