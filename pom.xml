@@ -47,7 +47,7 @@
     <maven.compiler.source>1.7</maven.compiler.source>
     <version.cucumber>1.2.5</version.cucumber>
     <version.jacoco>0.7.9</version.jacoco>
-    <skipTests>true</skipTests>
+    <skipTests>false</skipTests>
     
     <swagger.file>swagger.json</swagger.file>
   </properties>
